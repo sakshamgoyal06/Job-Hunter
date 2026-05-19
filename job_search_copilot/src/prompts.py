@@ -251,7 +251,7 @@ def rank_job_leads_prompt(
 ) -> tuple[str, str]:
     system = """You rank job postings for an Indian professional.
 Use the candidate JSON (LinkedIn + CV + CTC + synthesis) and the structured preferences JSON.
-Each lead may only contain a snippet — score conservatively if information is thin.
+Each lead may only contain a snippet or partial JD — score conservatively if information is thin.
 Never invent facts about the employer beyond the snippet.
 Output STRICT JSON only."""
     slim = []
@@ -263,7 +263,7 @@ Output STRICT JSON only."""
                 "company_name": L.get("company_name"),
                 "location": L.get("location"),
                 "platform": L.get("platform"),
-                "snippet": (L.get("snippet") or "")[:1200],
+                "snippet": (L.get("jd_text") or L.get("snippet") or "")[:2500],
                 "job_url": L.get("job_url"),
             }
         )
@@ -279,6 +279,63 @@ Output STRICT JSON only."""
   ]
 }}
 Provide one evaluation object per lead index (0..n-1). ai_fit_score is 0-100."""
+    return system, user_msg
+
+
+def job_hunt_playbook_prompt(
+    user: dict[str, Any],
+    profile: dict[str, Any],
+    preferences_nl: str,
+    prefs_struct: dict[str, Any] | None,
+) -> tuple[str, str]:
+    system = """You are an India-focused job search coach.
+You cannot browse the web. Build practical **search plans** and **ready-to-open LinkedIn Jobs URLs**
+using standard `https://www.linkedin.com/jobs/search/` query patterns (keywords, location, geoId optional).
+Also give Naukri / Instahyre / Wellfound guidance as plain text (not fake deep links unless you are sure of URL pattern).
+Add 3–6 **Google search queries** the user can paste into Google manually (e.g. site:linkedin.com/jobs/view with role keywords) — do not claim live results.
+Output STRICT JSON only."""
+    struct = json.dumps(prefs_struct or {}, ensure_ascii=False, indent=2)
+    user_msg = f"""Candidate JSON:\n{candidate_inputs_json(user, profile)}\n\nPreferences (natural language):\n{preferences_nl}\n\nStructured preferences JSON:\n{struct}\n\nReturn JSON:
+{{
+  "strategy_summary": string,
+  "saved_searches": [
+    {{
+      "name": string,
+      "linkedin_jobs_url": string,
+      "notes": string
+    }}
+  ],
+  "other_portals_markdown": string,
+  "google_queries_for_manual_search": [ string ],
+  "weekly_routine_markdown": string
+}}
+Rules:
+- saved_searches: 4 to 8 entries; each linkedin_jobs_url must be a valid https URL string.
+- Tailor names/keywords to the user's target roles and cities.
+- google_queries_for_manual_search: 4 to 8 strings."""
+    return system, user_msg
+
+
+def bulk_job_import_extract_prompt(
+    pasted: str,
+    user: dict[str, Any],
+    profile: dict[str, Any],
+) -> tuple[str, str]:
+    system = """You extract job posting rows from messy user paste (bullet lists, tabs, recruiter messages, etc.).
+Each item must include a real http(s) job URL when present. If URL is missing for a row, skip that row.
+Output STRICT JSON only."""
+    user_msg = f"""Candidate JSON (for light disambiguation only):\n{candidate_inputs_json(user, profile)}\n\nPasted text:\n---\n{pasted[:14000]}\n---\n\nReturn JSON:
+{{
+  "items": [
+    {{
+      "job_url": string,
+      "title": string,
+      "company_name": string,
+      "location": string
+    }}
+  ]
+}}
+Maximum 35 items. job_url is required for every item."""
     return system, user_msg
 
 

@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.config import OPENAI_API_KEY, SERPAPI_API_KEY
+from src.config import OPENAI_API_KEY
 from src.db import init_db
 from src.models import (
     JOB_SOURCES,
@@ -38,8 +38,10 @@ from src.services import (
     compensation_service,
     interview_service,
     job_discovery_service,
+    job_import_service,
     job_service,
     outreach_service,
+    playbook_service,
     preferences_service,
     profile_service,
     resume_service,
@@ -437,146 +439,247 @@ def page_job_discovery() -> None:
     _warn_incomplete_profile(user, profile)
 
     st.markdown(
-        "Search the open web for postings (via **SerpApi → Google Jobs**, which aggregates many boards), "
-        "then **rank** leads against your preferences. **You still apply manually** on LinkedIn/Naukri/etc. "
-        "— this app cannot log in or submit forms on your behalf."
+        "Run searches **in your own browser** on LinkedIn, Naukri, Instahyre, etc. This page gives an **AI playbook** "
+        "(saved searches + queries), a **staging inbox** for links you paste, optional **JD blocks** for better ranking, "
+        "then **import** into your tracker for resume tailoring and interview prep. **No SerpApi required.**"
     )
 
     prefs_row = preferences_service.get_preferences(uid)
     nl_default = (prefs_row or {}).get("preferences_nl") or ""
-    prefs_nl = st.text_area(
-        "Job preferences (natural language)",
-        value=nl_default,
-        height=160,
-        placeholder="Example: Bangalore or remote, min 45 LPA fixed-heavy, product roles in fintech, "
-        "avoid IT services, open to Series B startups, not okay with 6-day week…",
-        key=f"prefs_nl_{uid}",
-    )
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.button("Save preferences", key=f"save_prefs_{uid}"):
-            structured = (prefs_row or {}).get("structured_json")
-            preferences_service.upsert_preferences(
-                uid, preferences_nl=prefs_nl, structured_json=structured
-            )
-            st.success("Saved.")
-            st.rerun()
-    with c2:
-        if st.button("Parse preferences with AI", key=f"parse_prefs_{uid}"):
-            if not OPENAI_API_KEY:
-                st.error("OPENAI_API_KEY missing.")
-            else:
-                try:
-                    parsed = preferences_service.parse_preferences_nl(prefs_nl)
-                    preferences_service.upsert_preferences(
-                        uid,
-                        preferences_nl=prefs_nl,
-                        structured_json=json.dumps(parsed, ensure_ascii=False),
-                    )
-                    st.success("Structured preferences updated.")
-                    st.rerun()
-                except Exception as exc:  # noqa: BLE001
-                    st.error(str(exc))
-    with c3:
-        if st.button("Clear saved leads", key=f"clr_leads_{uid}"):
-            job_discovery_service.clear_leads(uid)
-            st.success("Cleared.")
-            st.rerun()
-
     prefs_struct: dict[str, Any] = {}
     if prefs_row and prefs_row.get("structured_json"):
         try:
             prefs_struct = json.loads(prefs_row["structured_json"])
         except json.JSONDecodeError:
             prefs_struct = {}
-    with st.expander("Structured preferences (from AI)", expanded=False):
-        st.json(prefs_struct or {})
 
-    q_default, loc_default = job_discovery_service.build_search_query_from_prefs(
-        prefs_struct,
-        role_hint="",
+    tab_pref, tab_play, tab_imp, tab_stage = st.tabs(
+        ["1. Preferences", "2. Playbook", "3. Import & JDs", "4. Stage & rank"]
     )
-    st.subheader("Run search")
-    search_q = st.text_input("Search query", value=q_default, key=f"disc_q_{uid}")
-    search_loc = st.text_input("Location (SerpApi)", value=loc_default, key=f"disc_loc_{uid}")
 
-    if SERPAPI_API_KEY:
-        if st.button("Search & rank jobs", type="primary", key=f"disc_run_{uid}"):
-            if not OPENAI_API_KEY:
-                st.error("OPENAI_API_KEY required for ranking.")
-            else:
-                try:
-                    job_discovery_service.discover_and_store(
-                        uid,
-                        user,
-                        profile,
-                        prefs_struct or {},
-                        query=search_q,
-                        location=search_loc,
-                    )
-                    st.success("Leads stored — see table below.")
-                    st.rerun()
-                except Exception as exc:  # noqa: BLE001
-                    st.error(str(exc))
-    else:
-        st.info(
-            "Optional: set **SERPAPI_API_KEY** in `.env` to pull Google Jobs results automatically. "
-            "Without it, use the manual portal links below, then add roles under **Add / Analyze Job**."
+    with tab_pref:
+        prefs_nl = st.text_area(
+            "Job preferences (natural language)",
+            value=nl_default,
+            height=160,
+            placeholder="Example: Bangalore or remote, min 45 LPA fixed-heavy, product roles in fintech, "
+            "avoid IT services, open to Series B startups…",
+            key=f"prefs_nl_{uid}",
         )
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Save preferences", key=f"save_prefs_{uid}"):
+                structured = (prefs_row or {}).get("structured_json")
+                preferences_service.upsert_preferences(
+                    uid, preferences_nl=prefs_nl, structured_json=structured
+                )
+                st.success("Saved.")
+                st.rerun()
+        with c2:
+            if st.button("Parse preferences with AI", key=f"parse_prefs_{uid}"):
+                if not OPENAI_API_KEY:
+                    st.error("OPENAI_API_KEY missing.")
+                else:
+                    try:
+                        parsed = preferences_service.parse_preferences_nl(prefs_nl)
+                        preferences_service.upsert_preferences(
+                            uid,
+                            preferences_nl=prefs_nl,
+                            structured_json=json.dumps(parsed, ensure_ascii=False),
+                        )
+                        st.success("Structured preferences updated.")
+                        st.rerun()
+                    except Exception as exc:  # noqa: BLE001
+                        st.error(str(exc))
+        with st.expander("Structured preferences (from AI)", expanded=False):
+            st.json(prefs_struct or {})
+
+    with tab_play:
+        st.markdown("#### Quick portal links (from parsed prefs)")
         st.markdown(job_discovery_service.manual_search_links_markdown(prefs_struct or {}))
-
-    leads = job_discovery_service.list_leads(uid)
-    if leads:
-        st.subheader("Ranked leads")
-        df = pd.DataFrame(leads)
-        show = df[
-            [
-                "id",
-                "company_name",
-                "title",
-                "ai_fit_score",
-                "apply_recommendation",
-                "location",
-                "imported_job_id",
-            ]
-        ].copy()
-        st.dataframe(show, hide_index=True, use_container_width=True)
-        open_opts = {
-            f"#{row['id']} {row.get('company_name')} — {row.get('title')} (fit {row.get('ai_fit_score', '—')})": int(
-                row["id"]
-            )
-            for _, row in df.iterrows()
-            if not row.get("imported_job_id") and row.get("job_url")
-        }
-        if open_opts:
-            pick_open = st.selectbox("Open job link in browser", ["—"] + list(open_opts.keys()))
-            if pick_open != "—":
-                lid = open_opts[pick_open]
-                row = job_discovery_service.get_lead(lid)
-                url = (row or {}).get("job_url")
-                if url:
-                    st.link_button("Open posting", url)
-
-        imp_opts = {
-            f"#{row['id']} {row.get('company_name')} — {row.get('title')}": int(row["id"])
-            for _, row in df.iterrows()
-            if not row.get("imported_job_id")
-        }
-        picked = st.multiselect("Import into pipeline (runs JD fit analysis)", list(imp_opts.keys()))
-        if st.button("Import selected", key=f"imp_sel_{uid}") and picked:
+        st.divider()
+        if st.button("Generate job hunt playbook (AI)", type="primary", key=f"pb_gen_{uid}"):
             if not OPENAI_API_KEY:
                 st.error("OPENAI_API_KEY missing.")
             else:
-                for label in picked:
-                    lid = imp_opts[label]
+                try:
+                    pb = playbook_service.generate_playbook(
+                        user,
+                        profile,
+                        preferences_nl=prefs_nl,
+                        prefs_struct=prefs_struct or None,
+                    )
+                    st.session_state[f"playbook_json_{uid}"] = pb
+                    st.success("Playbook ready — scroll down.")
+                    st.rerun()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(str(exc))
+        pb = st.session_state.get(f"playbook_json_{uid}")
+        if pb:
+            st.markdown(pb.get("strategy_summary") or "")
+            st.markdown("##### Saved LinkedIn-style searches")
+            for s in pb.get("saved_searches") or []:
+                name = s.get("name") or "Search"
+                url = s.get("linkedin_jobs_url") or ""
+                st.markdown(f"**{name}**")
+                if url.startswith("http"):
+                    st.link_button(f"Open: {name}", url)
+                st.caption(s.get("notes") or "")
+            st.markdown(pb.get("other_portals_markdown") or "")
+            st.markdown("##### Google queries (paste into Google manually)")
+            for q in pb.get("google_queries_for_manual_search") or []:
+                st.code(q)
+            st.markdown(pb.get("weekly_routine_markdown") or "")
+
+    with tab_imp:
+        st.markdown(
+            "Paste **one URL per line**, or messy text (bullets, recruiter DMs). "
+            "Then attach **JD text** in the next tab using blocks separated by the delimiter (default `---` line)."
+        )
+        raw_import = st.text_area("Paste URLs or job text", height=220, key=f"imp_raw_{uid}")
+        mode = st.radio(
+            "Import mode",
+            ["URLs only (regex)", "AI extract rows (needs URLs in text)"],
+            horizontal=True,
+            key=f"imp_mode_{uid}",
+        )
+        if st.button("Append to staging table", type="primary", key=f"imp_go_{uid}"):
+            if not raw_import.strip():
+                st.error("Paste something first.")
+            elif mode.startswith("URLs"):
+                urls = job_import_service.extract_urls(raw_import)
+                if not urls:
+                    st.error("No http(s) URLs found.")
+                else:
+                    leads = job_import_service.leads_from_urls_only(urls)
+                    n = job_discovery_service.append_leads(uid, leads)
+                    st.success(f"Added {n} lead(s). Open tab 4 to attach JDs / rank / import.")
+                    st.rerun()
+            else:
+                if not OPENAI_API_KEY:
+                    st.error("OPENAI_API_KEY required for AI extract.")
+                else:
                     try:
-                        jid = job_discovery_service.import_lead(
-                            lid, user_id=uid, user=user, profile=profile
+                        leads = job_import_service.leads_from_ai_extract(
+                            raw_import, user=user, profile=profile
                         )
-                        st.success(f"Imported lead #{lid} → job #{jid}")
+                        if not leads:
+                            st.error("AI found no rows with valid URLs.")
+                        else:
+                            n = job_discovery_service.append_leads(uid, leads)
+                            st.success(f"Added {n} lead(s).")
+                            st.rerun()
                     except Exception as exc:  # noqa: BLE001
-                        st.error(f"Lead #{lid}: {exc}")
+                        st.error(str(exc))
+
+    with tab_stage:
+        open_cnt = len(job_discovery_service.list_open_leads_ordered(uid))
+        st.caption(f"Open (unimported) leads: **{open_cnt}** — sorted by id ascending for JD / rank order.")
+        if st.button("Clear staging table", key=f"clr_leads_{uid}"):
+            job_discovery_service.clear_leads(uid)
+            st.session_state.pop(f"playbook_json_{uid}", None)
+            st.success("Staging cleared.")
+            st.rerun()
+
+        delim = st.text_input(
+            "JD separator (use between pasted JD blocks)",
+            value="---",
+            key=f"jd_delim_{uid}",
+            help="First block → lowest lead id, second → next, etc.",
+        )
+        bulk_jd = st.text_area(
+            "Paste JD blocks (same order as open leads, split by separator above)",
+            height=200,
+            key=f"bulk_jd_{uid}",
+        )
+        if st.button("Attach JD blocks to open leads", key=f"jd_apply_{uid}"):
+            if not delim.strip():
+                st.error("Set a non-empty delimiter.")
+            else:
+                n, extra = job_discovery_service.apply_bulk_jds_to_open_leads(
+                    uid, bulk_jd, delimiter=delim
+                )
+                st.success(f"Updated {n} lead(s).")
+                if extra:
+                    st.warning(f"{extra} JD block(s) left over — add more leads or check order.")
                 st.rerun()
+
+        if st.button("AI rank open leads (uses JD/snippet + prefs)", type="primary", key=f"rank_open_{uid}"):
+            if not OPENAI_API_KEY:
+                st.error("OPENAI_API_KEY missing.")
+            else:
+                try:
+                    n, warn = job_discovery_service.rank_and_persist_open_leads(
+                        uid, user, profile, prefs_struct or {}
+                    )
+                    if n == 0:
+                        st.info("No open leads to rank.")
+                    else:
+                        st.success(f"Ranked {n} lead(s).")
+                    if warn:
+                        st.warning(warn)
+                    st.rerun()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(str(exc))
+
+        leads = job_discovery_service.list_leads(uid)
+        if leads:
+            st.subheader("Staging & history")
+            df = pd.DataFrame(leads)
+            show_cols = [
+                c
+                for c in [
+                    "id",
+                    "company_name",
+                    "title",
+                    "ai_fit_score",
+                    "apply_recommendation",
+                    "imported_job_id",
+                    "job_url",
+                ]
+                if c in df.columns
+            ]
+            st.dataframe(df[show_cols], hide_index=True, use_container_width=True)
+            open_opts = {
+                f"#{row['id']} {row.get('company_name')} — {row.get('title')} (fit {row.get('ai_fit_score', '—')})": int(
+                    row["id"]
+                )
+                for _, row in df.iterrows()
+                if not row.get("imported_job_id") and row.get("job_url")
+            }
+            if open_opts:
+                pick_open = st.selectbox("Open job link", ["—"] + list(open_opts.keys()), key=f"oplnk_{uid}")
+                if pick_open != "—":
+                    lid = open_opts[pick_open]
+                    row = job_discovery_service.get_lead(lid)
+                    url = (row or {}).get("job_url")
+                    if url:
+                        st.link_button("Open posting", url)
+
+            imp_opts = {
+                f"#{row['id']} {row.get('company_name')} — {row.get('title')}": int(row["id"])
+                for _, row in df.iterrows()
+                if not row.get("imported_job_id")
+            }
+            picked = st.multiselect(
+                "Import into pipeline (runs JD fit analysis)", list(imp_opts.keys()), key=f"imp_ms_{uid}"
+            )
+            if st.button("Import selected to tracker", key=f"imp_sel_{uid}") and picked:
+                if not OPENAI_API_KEY:
+                    st.error("OPENAI_API_KEY missing.")
+                else:
+                    for label in picked:
+                        lid = imp_opts[label]
+                        try:
+                            jid = job_discovery_service.import_lead(
+                                lid, user_id=uid, user=user, profile=profile
+                            )
+                            st.success(f"Imported lead #{lid} → job #{jid}")
+                        except Exception as exc:  # noqa: BLE001
+                            st.error(f"Lead #{lid}: {exc}")
+                    st.rerun()
+        else:
+            st.info("Staging is empty — use **Import & JDs** to add links.")
 
 
 def page_apply_pack() -> None:

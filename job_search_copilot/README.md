@@ -58,7 +58,7 @@ This is **not** a mass auto-apply bot. It is a **high-quality copilot**: honest 
 ## How to use (short)
 
 1. **User Profile** — Paste **LinkedIn profile text** and **resume/CV** (or upload PDF/txt). Enter **current total CTC (LPA)** only. Optionally add name/email for PDF headers. Use **Update career brief (AI)** for suggested roles and CTC bands in India.
-2. **Job Discovery** — Describe preferences in natural language, **Parse preferences with AI**, then (optionally) set `SERPAPI_API_KEY` and run **Search & rank jobs** (Google Jobs via SerpApi). Import leads into your pipeline; open postings and apply on the portal yourself.
+2. **Job Discovery** — Save & parse **preferences**, open **Playbook** for AI-built LinkedIn links + Google queries, **Import** pasted URLs or messy text into **staging**, optionally attach **JD blocks** (delimiter `---`), **AI rank**, then **import** into your tracker. No SerpApi required.
 3. **Add / Analyze Job** — Manually paste a JD and run **Analyze Job Fit** (use this for Naukri/LinkedIn tabs when not using SerpApi discovery).
 4. **Apply pack** — Generate a **cover letter + checklist**, open the posting link, tailor your resume on **Resume Tailor**, then **Mark as Applied** when done.
 5. **Resume Tailor** — Pick a job, generate a tailored resume (no invented facts), then **Export DOCX**.
@@ -81,7 +81,7 @@ On next run, tables are recreated empty.
 ## Limitations (MVP)
 
 - **No auto-apply** — LinkedIn, Naukri, Instahyre, and similar sites require you to sign in and submit applications yourself. This app prepares materials and tracks state only.
-- **Discovery source** — Automated job pull uses **SerpApi’s Google Jobs** engine (aggregated listings), not private APIs from each portal. Results and URLs vary by what Google exposes; respect each platform’s terms when applying.
+- **Discovery source** — You paste job URLs / text from portals you searched manually. Optional **SERPAPI_API_KEY** still enables a separate Google Jobs fetch in code, but the UI is built around the human-in-the-loop flow.
 - **Cold outreach** — Company “research” is LLM text from your profile + company name/URL only; there is **no live web crawl**. Verify facts before sending mail.
 - **Single machine / SQLite** — not suitable for concurrent multi-user production hosting.
 - **No authentication** — sidebar profiles are for convenience, not security.

@@ -1,4 +1,4 @@
-"""Job discovery: optional SerpApi Google Jobs + AI ranking vs preferences."""
+"""Job discovery: staged leads (manual import) + optional SerpApi + AI ranking."""
 
 from __future__ import annotations
 
@@ -64,6 +64,106 @@ def fetch_google_jobs_serpapi(*, query: str, location: str = "India") -> list[di
 
 def clear_leads(user_id: int) -> None:
     db.execute_write("DELETE FROM job_leads WHERE user_id=?", (user_id,))
+
+
+def append_leads(user_id: int, leads: list[dict[str, Any]]) -> int:
+    """Append staging rows; returns number inserted."""
+    ts = _now()
+    n = 0
+    for L in leads:
+        db.execute_write(
+            """
+            INSERT INTO job_leads (
+                user_id, title, company_name, location, platform, job_url, snippet, jd_text,
+                ai_fit_score, ai_rationale, apply_recommendation, imported_job_id, created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                user_id,
+                L.get("title"),
+                L.get("company_name"),
+                L.get("location"),
+                L.get("platform"),
+                L.get("job_url"),
+                L.get("snippet"),
+                L.get("jd_text") or L.get("snippet"),
+                L.get("ai_fit_score"),
+                L.get("ai_rationale"),
+                L.get("apply_recommendation"),
+                None,
+                ts,
+            ),
+        )
+        n += 1
+    return n
+
+
+def list_open_leads_ordered(user_id: int) -> list[dict[str, Any]]:
+    rows = db.fetch_all(
+        """
+        SELECT * FROM job_leads
+        WHERE user_id=? AND imported_job_id IS NULL
+        ORDER BY id ASC
+        """,
+        (user_id,),
+    )
+    return [db.row_as_dict(r) or {} for r in rows]
+
+
+def apply_bulk_jds_to_open_leads(
+    user_id: int, raw_text: str, *, delimiter: str
+) -> tuple[int, int]:
+    """Assign JD blocks to open leads in stable id order. Returns (updated_count, extra_blocks)."""
+    if not raw_text.strip():
+        return 0, 0
+    blocks = [b.strip() for b in raw_text.split(delimiter) if b.strip()]
+    rows = list_open_leads_ordered(user_id)
+    n = 0
+    for i, block in enumerate(blocks):
+        if i >= len(rows):
+            return n, len(blocks) - i
+        lid = int(rows[i]["id"])
+        db.execute_write(
+            """
+            UPDATE job_leads SET jd_text=?, snippet=?
+            WHERE id=? AND user_id=? AND imported_job_id IS NULL
+            """,
+            (block, block[:4000], lid, user_id),
+        )
+        n += 1
+    return n, 0
+
+
+def rank_and_persist_open_leads(
+    user_id: int,
+    user: dict[str, Any],
+    profile: dict[str, Any],
+    prefs_struct: dict[str, Any],
+) -> tuple[int, str | None]:
+    """AI-rank open leads and persist scores. Returns (count_ranked, warning)."""
+    rows = list_open_leads_ordered(user_id)
+    if not rows:
+        return 0, None
+    warn: str | None = None
+    if len(rows) > 18:
+        warn = f"Ranking only the first 18 of {len(rows)} open leads. Clear or import some, then rank again."
+        rows = rows[:18]
+    ranked = rank_leads_with_ai(user, profile, prefs_struct or {}, rows)
+    for base, m in zip(rows, ranked):
+        db.execute_write(
+            """
+            UPDATE job_leads SET ai_fit_score=?, ai_rationale=?, apply_recommendation=?
+            WHERE id=? AND user_id=?
+            """,
+            (
+                m.get("ai_fit_score"),
+                m.get("ai_rationale"),
+                m.get("apply_recommendation"),
+                int(base["id"]),
+                user_id,
+            ),
+        )
+    return len(rows), warn
 
 
 def insert_leads(user_id: int, leads: list[dict[str, Any]]) -> None:
