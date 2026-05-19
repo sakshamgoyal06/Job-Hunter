@@ -18,27 +18,40 @@ def clean_text(value: str | None, max_len: int | None = None) -> str:
 def is_profile_incomplete(
     user: dict[str, Any] | None, profile: dict[str, Any] | None
 ) -> tuple[bool, list[str]]:
+    """Lightweight profile: LinkedIn text + CV text + current CTC (LPA)."""
     missing: list[str] = []
     if not user:
         return True, ["No user selected"]
-    for field, label in (
-        ("name", "Name"),
-        ("email", "Email"),
-        ("current_title", "Current title"),
-        ("current_company", "Current company"),
-    ):
-        if not clean_text(user.get(field)):
-            missing.append(label)
-    if profile:
-        if not clean_text(profile.get("professional_summary")):
-            missing.append("Professional summary")
-        if not clean_text(profile.get("skills")):
-            missing.append("Skills")
-        if not clean_text(profile.get("work_experience")):
-            missing.append("Work experience")
-    else:
-        missing.append("Profile details (summary, skills, experience)")
+    ctc = user.get("current_ctc_lpa")
+    try:
+        ctc_ok = ctc is not None and float(ctc) > 0
+    except (TypeError, ValueError):
+        ctc_ok = False
+    if not ctc_ok:
+        missing.append("Current total CTC (LPA)")
+
+    prof = profile or {}
+    ln = clean_text(prof.get("linkedin_profile_text"))
+    cv = clean_text(prof.get("resume_cv_text")) or clean_text(prof.get("base_resume_text"))
+    if len(ln) < 40:
+        missing.append("LinkedIn profile text (paste more from your profile)")
+    if len(cv) < 40:
+        missing.append("Resume / CV text (paste more or upload a file)")
+
+    # Optional: name/email for exports — warn only, do not block
     return bool(missing), missing
+
+
+def export_contact_incomplete(user: dict[str, Any] | None) -> tuple[bool, list[str]]:
+    """Soft check for DOCX / outreach contact lines."""
+    if not user:
+        return True, ["No user selected"]
+    miss: list[str] = []
+    if not clean_text(user.get("name")):
+        miss.append("Display name (for resume header)")
+    if not clean_text(user.get("email")):
+        miss.append("Email (optional but useful on resume)")
+    return bool(miss), miss
 
 
 def extract_json_object(raw: str) -> str | None:

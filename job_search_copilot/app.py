@@ -8,6 +8,7 @@ Run from repo root or this folder:
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -31,6 +32,7 @@ from src.models import (
     WORK_MODES,
 )
 from src.services import (
+    candidate_brief_service,
     compensation_service,
     interview_service,
     job_service,
@@ -38,7 +40,8 @@ from src.services import (
     profile_service,
     resume_service,
 )
-from src.utils.text_utils import is_profile_incomplete
+from src.utils.file_extract import extract_text_from_upload
+from src.utils.text_utils import export_contact_incomplete, is_profile_incomplete
 
 PAGES = [
     "Dashboard",
@@ -104,10 +107,18 @@ def _warn_incomplete_profile(user: dict[str, Any], profile: dict[str, Any]) -> N
     bad, missing = is_profile_incomplete(user, profile)
     if bad:
         st.warning(
-            "Profile looks incomplete for best AI results: "
-            + ", ".join(missing)
-            + ". Visit **User Profile**."
+            "Add the essentials for accurate AI: " + ", ".join(missing) + ". See **User Profile**."
         )
+    elif not (profile or {}).get("ai_candidate_brief"):
+        st.info(
+            "Optional: open **User Profile** and run **Update career brief (AI)** for role ideas and CTC target guidance."
+        )
+
+
+def _soft_contact_warning(user: dict[str, Any]) -> None:
+    bad, miss = export_contact_incomplete(user)
+    if bad and miss:
+        st.caption("Tip: add " + ", ".join(miss) + " on **User Profile** for cleaner resume PDFs.")
 
 
 def page_dashboard() -> None:
@@ -169,18 +180,43 @@ def page_dashboard() -> None:
     st.dataframe(recent, hide_index=True, use_container_width=True)
 
 
+def _clear_profile_widget_state(suffix: str) -> None:
+    for k in (
+        f"_hydr_sf_{suffix}",
+        f"ln_{suffix}",
+        f"cv_{suffix}",
+        f"nm_{suffix}",
+        f"em_{suffix}",
+        f"ph_{suffix}",
+        f"ctc_{suffix}",
+    ):
+        st.session_state.pop(k, None)
+
+
 def page_user_profile() -> None:
     st.header("User Profile")
+    st.caption(
+        "Paste your **LinkedIn profile** (About + Experience + Headline) and your **resume/CV** text. "
+        "We only ask for your **current total CTC (LPA)** — the app infers skills, education, and experience from those two sources."
+    )
     users = profile_service.list_users()
     uid = st.session_state.selected_user_id
 
     with st.expander("Create another profile", expanded=False):
-        st.caption("Use this for friends sharing the same app instance.")
-        new_name = st.text_input("New profile name", key="new_prof_name")
+        st.caption("For friends sharing this app on one machine.")
+        new_name = st.text_input("New profile label", key="new_prof_name")
         if st.button("Create blank profile") and new_name.strip():
             nid = profile_service.create_user({"name": new_name.strip()})
-            profile_service.upsert_profile(nid, {})
+            profile_service.upsert_profile(
+                nid,
+                {
+                    "linkedin_profile_text": "",
+                    "resume_cv_text": "",
+                    "base_resume_text": None,
+                },
+            )
             st.session_state.selected_user_id = nid
+            _clear_profile_widget_state(str(nid))
             st.success(f"Created profile #{nid}")
             st.rerun()
 
@@ -192,67 +228,145 @@ def page_user_profile() -> None:
             st.session_state.selected_user_id = users[0]["id"]
             st.rerun()
 
-    st.subheader("Basics")
-    c1, c2 = st.columns(2)
+    suffix = str(uid) if uid else "new"
+    hkey = f"_hydr_sf_{suffix}"
+    if hkey not in st.session_state:
+        if uid:
+            st.session_state[f"ln_{suffix}"] = profile.get("linkedin_profile_text") or ""
+            st.session_state[f"cv_{suffix}"] = (
+                profile.get("resume_cv_text") or profile.get("base_resume_text") or ""
+            )
+            st.session_state[f"nm_{suffix}"] = user.get("name") or "My profile"
+            st.session_state[f"em_{suffix}"] = user.get("email") or ""
+            st.session_state[f"ph_{suffix}"] = user.get("phone") or ""
+            st.session_state[f"ctc_{suffix}"] = float(user.get("current_ctc_lpa") or 0.0)
+        else:
+            st.session_state.setdefault(f"ln_{suffix}", "")
+            st.session_state.setdefault(f"cv_{suffix}", "")
+            st.session_state.setdefault(f"nm_{suffix}", "My profile")
+            st.session_state.setdefault(f"em_{suffix}", "")
+            st.session_state.setdefault(f"ph_{suffix}", "")
+            st.session_state.setdefault(f"ctc_{suffix}", 0.0)
+        st.session_state[hkey] = True
+
+    st.subheader("Your inputs")
+    st.text_input("Display name (sidebar label)", key=f"nm_{suffix}")
+    st.text_input("Email (optional — for resume header)", key=f"em_{suffix}")
+    st.text_input("Phone (optional)", key=f"ph_{suffix}")
+    st.number_input("Current total CTC (LPA)", min_value=0.0, step=0.5, key=f"ctc_{suffix}")
+
+    st.markdown("**LinkedIn** — copy from your browser (Headline, About, Experience).")
+    st.text_area("LinkedIn profile text", key=f"ln_{suffix}", height=220)
+
+    c1, c2 = st.columns((2, 1))
     with c1:
-        name = st.text_input("Name", value=user.get("name") or "")
-        email = st.text_input("Email", value=user.get("email") or "")
-        phone = st.text_input("Phone", value=user.get("phone") or "")
-        loc = st.text_input("Current location", value=user.get("current_location") or "")
-        title = st.text_input("Current title", value=user.get("current_title") or "")
-        company = st.text_input("Current company", value=user.get("current_company") or "")
+        st.markdown("**Resume / CV** — paste full text.")
+        st.text_area("Resume / CV text", key=f"cv_{suffix}", height=320)
     with c2:
-        cur_ctc = st.number_input("Current CTC (LPA)", value=float(user.get("current_ctc_lpa") or 0.0), step=0.5)
-        fixed_ctc = st.number_input("Fixed CTC (LPA)", value=float(user.get("fixed_ctc_lpa") or 0.0), step=0.5)
-        var_ctc = st.number_input("Variable CTC (LPA)", value=float(user.get("variable_ctc_lpa") or 0.0), step=0.5)
-        esop = st.number_input("ESOPs value (LPA equiv.)", value=float(user.get("esops_value_lpa") or 0.0), step=0.5)
-        exp_ctc = st.number_input("Expected CTC (LPA)", value=float(user.get("expected_ctc_lpa") or 0.0), step=0.5)
-        notice = st.number_input("Notice period (days)", value=int(user.get("notice_period_days") or 0), step=1)
-        pref_loc = st.text_area("Preferred locations", value=user.get("preferred_locations") or "")
-        tgt_roles = st.text_area("Target roles", value=user.get("target_roles") or "")
-        tgt_ind = st.text_area("Target industries", value=user.get("target_industries") or "")
+        st.markdown("**Or upload** PDF / text (appends on button).")
+        up = st.file_uploader("File", type=["pdf", "txt", "md"], key=f"cv_up_{suffix}")
+        if up is not None and st.button("Extract & append to CV", key=f"app_cv_{suffix}"):
+            try:
+                chunk = extract_text_from_upload(up.name, up.getvalue())
+                if not chunk.strip():
+                    st.error("No text extracted from file.")
+                else:
+                    cur = str(st.session_state.get(f"cv_{suffix}", ""))
+                    st.session_state[f"cv_{suffix}"] = (cur + "\n\n" + chunk.strip()).strip()
+                    st.success("Appended. Review the CV text box.")
+                    st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(str(exc))
 
-    st.subheader("Profile content")
-    summary = st.text_area("Professional summary", value=profile.get("professional_summary") or "", height=120)
-    skills = st.text_area("Skills", value=profile.get("skills") or "", height=120)
-    work_exp = st.text_area("Work experience", value=profile.get("work_experience") or "", height=220)
-    projects = st.text_area("Projects", value=profile.get("projects") or "", height=160)
-    achievements = st.text_area("Achievements", value=profile.get("achievements") or "", height=160)
-    education = st.text_area("Education", value=profile.get("education") or "", height=120)
-    certs = st.text_area("Certifications", value=profile.get("certifications") or "", height=100)
-    base_resume = st.text_area("Base resume text", value=profile.get("base_resume_text") or "", height=260)
+    brief_raw = (profile or {}).get("ai_candidate_brief") if uid else None
+    if brief_raw:
+        st.subheader("Saved career brief (AI)")
+        with st.expander("View raw JSON", expanded=False):
+            st.json(brief_raw)
 
+    st.subheader("Career guidance (AI)")
+    st.caption(
+        "Summarizes experience, education, and skills from your LinkedIn + CV only, then suggests **roles to explore** "
+        "and **realistic CTC bands** for India given your stated current CTC."
+    )
+    if uid and st.button("Update career brief (AI)", type="secondary"):
+        if not OPENAI_API_KEY:
+            st.error("Add OPENAI_API_KEY to `.env` (see README).")
+        else:
+            ln = str(st.session_state.get(f"ln_{suffix}", ""))
+            cv = str(st.session_state.get(f"cv_{suffix}", ""))
+            ctc_val = float(st.session_state.get(f"ctc_{suffix}", 0.0) or 0.0)
+            try:
+                brief = candidate_brief_service.synthesize_brief(
+                    linkedin_text=ln,
+                    resume_cv_text=cv,
+                    current_ctc_lpa=ctc_val if ctc_val > 0 else None,
+                )
+                candidate_brief_service.save_ai_brief(uid, brief)
+                _clear_profile_widget_state(suffix)
+                st.success("Career brief updated.")
+                st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(str(exc))
+
+    if brief_raw and uid:
+        try:
+            b = json.loads(brief_raw)
+            st.markdown("#### Roles to target")
+            st.markdown(b.get("suggested_roles_to_target") or "—")
+            st.markdown("#### CTC guidance")
+            st.markdown(b.get("realistic_ctc_target_guidance") or "—")
+            st.markdown("#### Caveats")
+            st.markdown(b.get("caveats") or "—")
+        except Exception:
+            pass
+
+    nm = str(st.session_state.get(f"nm_{suffix}", "My profile")).strip() or "My profile"
+    em = str(st.session_state.get(f"em_{suffix}", "")).strip() or None
+    ph = str(st.session_state.get(f"ph_{suffix}", "")).strip() or None
+    ctc_v = float(st.session_state.get(f"ctc_{suffix}", 0.0) or 0.0)
     user_data = {
-        "name": name.strip() or "Friend",
-        "email": email or None,
-        "phone": phone or None,
-        "current_location": loc or None,
-        "current_title": title or None,
-        "current_company": company or None,
-        "current_ctc_lpa": cur_ctc or None,
-        "fixed_ctc_lpa": fixed_ctc or None,
-        "variable_ctc_lpa": var_ctc or None,
-        "esops_value_lpa": esop or None,
-        "expected_ctc_lpa": exp_ctc or None,
-        "notice_period_days": int(notice) if notice else None,
-        "preferred_locations": pref_loc or None,
-        "target_roles": tgt_roles or None,
-        "target_industries": tgt_ind or None,
+        "name": nm,
+        "email": em,
+        "phone": ph,
+        "current_ctc_lpa": ctc_v if ctc_v > 0 else None,
+        "current_location": None,
+        "current_title": None,
+        "current_company": None,
+        "fixed_ctc_lpa": None,
+        "variable_ctc_lpa": None,
+        "esops_value_lpa": None,
+        "expected_ctc_lpa": None,
+        "notice_period_days": None,
+        "preferred_locations": None,
+        "target_roles": None,
+        "target_industries": None,
     }
+    ln_saved = str(st.session_state.get(f"ln_{suffix}", ""))
+    cv_saved = str(st.session_state.get(f"cv_{suffix}", ""))
+    existing_brief = (profile or {}).get("ai_candidate_brief") if uid else None
     prof_data = {
-        "professional_summary": summary or None,
-        "skills": skills or None,
-        "work_experience": work_exp or None,
-        "projects": projects or None,
-        "achievements": achievements or None,
-        "education": education or None,
-        "certifications": certs or None,
-        "base_resume_text": base_resume or None,
+        "linkedin_profile_text": ln_saved or None,
+        "resume_cv_text": cv_saved or None,
+        "base_resume_text": cv_saved or None,
+        "professional_summary": None,
+        "skills": None,
+        "work_experience": None,
+        "projects": None,
+        "achievements": None,
+        "education": None,
+        "certifications": None,
+        "ai_candidate_brief": existing_brief,
     }
 
     if st.button("Save profile", type="primary"):
-        new_id = profile_service.merge_user_profile_form(uid, user_data, prof_data)
-        st.session_state.selected_user_id = new_id
+        if not uid:
+            new_id = profile_service.merge_user_profile_form(None, user_data, prof_data)
+            st.session_state.selected_user_id = new_id
+            _clear_profile_widget_state("new")
+        else:
+            profile_service.merge_user_profile_form(uid, user_data, prof_data)
+            _clear_profile_widget_state(suffix)
         st.success("Saved.")
         st.rerun()
 
@@ -314,6 +428,7 @@ def page_resume() -> None:
         return
     user, profile = _load_user_context(uid)
     _warn_incomplete_profile(user, profile)
+    _soft_contact_warning(user)
 
     jobs = job_service.list_jobs_for_user(uid)
     if not jobs:
@@ -388,6 +503,7 @@ def page_outreach() -> None:
         return
     user, profile = _load_user_context(uid)
     _warn_incomplete_profile(user, profile)
+    _soft_contact_warning(user)
 
     jobs = job_service.list_jobs_for_user(uid)
     if not jobs:

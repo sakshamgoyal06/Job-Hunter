@@ -104,6 +104,7 @@ def upsert_profile(user_id: int, fields: dict[str, Any]) -> None:
             UPDATE profiles SET
                 professional_summary=?, skills=?, work_experience=?, projects=?,
                 achievements=?, education=?, certifications=?, base_resume_text=?,
+                linkedin_profile_text=?, resume_cv_text=?, ai_candidate_brief=?,
                 updated_at=?
             WHERE user_id=?
             """,
@@ -116,6 +117,9 @@ def upsert_profile(user_id: int, fields: dict[str, Any]) -> None:
                 fields.get("education"),
                 fields.get("certifications"),
                 fields.get("base_resume_text"),
+                fields.get("linkedin_profile_text"),
+                fields.get("resume_cv_text"),
+                fields.get("ai_candidate_brief"),
                 ts,
                 user_id,
             ),
@@ -126,8 +130,9 @@ def upsert_profile(user_id: int, fields: dict[str, Any]) -> None:
             INSERT INTO profiles (
                 user_id, professional_summary, skills, work_experience, projects,
                 achievements, education, certifications, base_resume_text,
+                linkedin_profile_text, resume_cv_text, ai_candidate_brief,
                 created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 user_id,
@@ -139,6 +144,9 @@ def upsert_profile(user_id: int, fields: dict[str, Any]) -> None:
                 fields.get("education"),
                 fields.get("certifications"),
                 fields.get("base_resume_text"),
+                fields.get("linkedin_profile_text"),
+                fields.get("resume_cv_text"),
+                fields.get("ai_candidate_brief"),
                 ts,
                 ts,
             ),

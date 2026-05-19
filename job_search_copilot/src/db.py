@@ -70,6 +70,9 @@ def init_db() -> None:
                 education TEXT,
                 certifications TEXT,
                 base_resume_text TEXT,
+                linkedin_profile_text TEXT,
+                resume_cv_text TEXT,
+                ai_candidate_brief TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -157,6 +160,21 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_interview_user ON interview_prep(user_id);
             """
         )
+        _migrate_schema(conn)
+
+
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after first schema version."""
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(profiles)")
+    cols = {row[1] for row in cur.fetchall()}
+    for col, ddl in (
+        ("linkedin_profile_text", "TEXT"),
+        ("resume_cv_text", "TEXT"),
+        ("ai_candidate_brief", "TEXT"),
+    ):
+        if col not in cols:
+            cur.execute(f"ALTER TABLE profiles ADD COLUMN {col} {ddl}")
 
 
 def fetch_one(query: str, params: tuple[Any, ...] = ()) -> sqlite3.Row | None:

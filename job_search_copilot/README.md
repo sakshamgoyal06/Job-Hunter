@@ -32,18 +32,22 @@ This is **not** a mass auto-apply bot. It is a **high-quality copilot**: honest 
 
    Edit `.env` and set `OPENAI_API_KEY`. Optional: `OPENAI_MODEL` (defaults to `gpt-4o-mini`).
 
+   You can also export the key in your shell instead of using a file: `export OPENAI_API_KEY=...`
+
+   **Cursor:** if you use Cursor global secrets / environment injection, the same variable name `OPENAI_API_KEY` is read by the app (via `python-dotenv` and the process environment).
+
 5. **Run the app**
 
    From the `job_search_copilot` folder:
 
    ```bash
-   streamlit run app.py
+   python3 -m streamlit run app.py
    ```
 
    Or from the repository root:
 
    ```bash
-   streamlit run job_search_copilot/app.py
+   python3 -m streamlit run job_search_copilot/app.py
    ```
 
 ## First run
@@ -53,7 +57,7 @@ This is **not** a mass auto-apply bot. It is a **high-quality copilot**: honest 
 
 ## How to use (short)
 
-1. **User Profile** — Save identity, CTC fields, notice period, and long-form career content (experience, projects, etc.).
+1. **User Profile** — Paste **LinkedIn profile text** and **resume/CV** (or upload PDF/txt). Enter **current total CTC (LPA)** only. Optionally add name/email for PDF headers. Use **Update career brief (AI)** for suggested roles and CTC bands in India.
 2. **Add / Analyze Job** — Paste a JD and run **Analyze Job Fit** to extract skills, fit score, and recommendations.
 3. **Resume Tailor** — Pick a job, generate a tailored resume (no invented facts), then **Export DOCX**.
 4. **Outreach Generator** — Short India-context messages; LinkedIn drafts are kept under 900 characters when the model obeys the prompt (verify before sending).
