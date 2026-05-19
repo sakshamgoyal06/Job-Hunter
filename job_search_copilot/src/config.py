@@ -25,6 +25,8 @@ OPENAI_TEMPERATURE_CREATIVE: float = float(
     os.getenv("OPENAI_TEMPERATURE_CREATIVE", "0.35")
 )
 
+SERPAPI_API_KEY: str = os.getenv("SERPAPI_API_KEY", "").strip()
+
 
 def ensure_directories() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)

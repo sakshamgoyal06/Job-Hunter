@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.config import OPENAI_API_KEY
+from src.config import OPENAI_API_KEY, SERPAPI_API_KEY
 from src.db import init_db
 from src.models import (
     JOB_SOURCES,
@@ -32,11 +32,15 @@ from src.models import (
     WORK_MODES,
 )
 from src.services import (
+    application_pack_service,
     candidate_brief_service,
+    cold_prospecting_service,
     compensation_service,
     interview_service,
+    job_discovery_service,
     job_service,
     outreach_service,
+    preferences_service,
     profile_service,
     resume_service,
 )
@@ -46,12 +50,15 @@ from src.utils.text_utils import export_contact_incomplete, is_profile_incomplet
 PAGES = [
     "Dashboard",
     "User Profile",
+    "Job Discovery",
     "Add / Analyze Job",
+    "Apply pack",
     "Resume Tailor",
     "Outreach Generator",
     "Interview Prep",
     "Application Tracker",
     "Compensation Comparator",
+    "Cold prospecting",
 ]
 
 
@@ -418,6 +425,284 @@ def page_add_job() -> None:
                 st.json(ai)
             except Exception as exc:  # noqa: BLE001
                 st.error(f"Analysis failed: {exc}")
+
+
+def page_job_discovery() -> None:
+    st.header("Job Discovery")
+    uid = st.session_state.selected_user_id
+    if not uid:
+        st.warning("Select a profile in the sidebar first.")
+        return
+    user, profile = _load_user_context(uid)
+    _warn_incomplete_profile(user, profile)
+
+    st.markdown(
+        "Search the open web for postings (via **SerpApi → Google Jobs**, which aggregates many boards), "
+        "then **rank** leads against your preferences. **You still apply manually** on LinkedIn/Naukri/etc. "
+        "— this app cannot log in or submit forms on your behalf."
+    )
+
+    prefs_row = preferences_service.get_preferences(uid)
+    nl_default = (prefs_row or {}).get("preferences_nl") or ""
+    prefs_nl = st.text_area(
+        "Job preferences (natural language)",
+        value=nl_default,
+        height=160,
+        placeholder="Example: Bangalore or remote, min 45 LPA fixed-heavy, product roles in fintech, "
+        "avoid IT services, open to Series B startups, not okay with 6-day week…",
+        key=f"prefs_nl_{uid}",
+    )
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("Save preferences", key=f"save_prefs_{uid}"):
+            structured = (prefs_row or {}).get("structured_json")
+            preferences_service.upsert_preferences(
+                uid, preferences_nl=prefs_nl, structured_json=structured
+            )
+            st.success("Saved.")
+            st.rerun()
+    with c2:
+        if st.button("Parse preferences with AI", key=f"parse_prefs_{uid}"):
+            if not OPENAI_API_KEY:
+                st.error("OPENAI_API_KEY missing.")
+            else:
+                try:
+                    parsed = preferences_service.parse_preferences_nl(prefs_nl)
+                    preferences_service.upsert_preferences(
+                        uid,
+                        preferences_nl=prefs_nl,
+                        structured_json=json.dumps(parsed, ensure_ascii=False),
+                    )
+                    st.success("Structured preferences updated.")
+                    st.rerun()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(str(exc))
+    with c3:
+        if st.button("Clear saved leads", key=f"clr_leads_{uid}"):
+            job_discovery_service.clear_leads(uid)
+            st.success("Cleared.")
+            st.rerun()
+
+    prefs_struct: dict[str, Any] = {}
+    if prefs_row and prefs_row.get("structured_json"):
+        try:
+            prefs_struct = json.loads(prefs_row["structured_json"])
+        except json.JSONDecodeError:
+            prefs_struct = {}
+    with st.expander("Structured preferences (from AI)", expanded=False):
+        st.json(prefs_struct or {})
+
+    q_default, loc_default = job_discovery_service.build_search_query_from_prefs(
+        prefs_struct,
+        role_hint="",
+    )
+    st.subheader("Run search")
+    search_q = st.text_input("Search query", value=q_default, key=f"disc_q_{uid}")
+    search_loc = st.text_input("Location (SerpApi)", value=loc_default, key=f"disc_loc_{uid}")
+
+    if SERPAPI_API_KEY:
+        if st.button("Search & rank jobs", type="primary", key=f"disc_run_{uid}"):
+            if not OPENAI_API_KEY:
+                st.error("OPENAI_API_KEY required for ranking.")
+            else:
+                try:
+                    job_discovery_service.discover_and_store(
+                        uid,
+                        user,
+                        profile,
+                        prefs_struct or {},
+                        query=search_q,
+                        location=search_loc,
+                    )
+                    st.success("Leads stored — see table below.")
+                    st.rerun()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(str(exc))
+    else:
+        st.info(
+            "Optional: set **SERPAPI_API_KEY** in `.env` to pull Google Jobs results automatically. "
+            "Without it, use the manual portal links below, then add roles under **Add / Analyze Job**."
+        )
+        st.markdown(job_discovery_service.manual_search_links_markdown(prefs_struct or {}))
+
+    leads = job_discovery_service.list_leads(uid)
+    if leads:
+        st.subheader("Ranked leads")
+        df = pd.DataFrame(leads)
+        show = df[
+            [
+                "id",
+                "company_name",
+                "title",
+                "ai_fit_score",
+                "apply_recommendation",
+                "location",
+                "imported_job_id",
+            ]
+        ].copy()
+        st.dataframe(show, hide_index=True, use_container_width=True)
+        open_opts = {
+            f"#{row['id']} {row.get('company_name')} — {row.get('title')} (fit {row.get('ai_fit_score', '—')})": int(
+                row["id"]
+            )
+            for _, row in df.iterrows()
+            if not row.get("imported_job_id") and row.get("job_url")
+        }
+        if open_opts:
+            pick_open = st.selectbox("Open job link in browser", ["—"] + list(open_opts.keys()))
+            if pick_open != "—":
+                lid = open_opts[pick_open]
+                row = job_discovery_service.get_lead(lid)
+                url = (row or {}).get("job_url")
+                if url:
+                    st.link_button("Open posting", url)
+
+        imp_opts = {
+            f"#{row['id']} {row.get('company_name')} — {row.get('title')}": int(row["id"])
+            for _, row in df.iterrows()
+            if not row.get("imported_job_id")
+        }
+        picked = st.multiselect("Import into pipeline (runs JD fit analysis)", list(imp_opts.keys()))
+        if st.button("Import selected", key=f"imp_sel_{uid}") and picked:
+            if not OPENAI_API_KEY:
+                st.error("OPENAI_API_KEY missing.")
+            else:
+                for label in picked:
+                    lid = imp_opts[label]
+                    try:
+                        jid = job_discovery_service.import_lead(
+                            lid, user_id=uid, user=user, profile=profile
+                        )
+                        st.success(f"Imported lead #{lid} → job #{jid}")
+                    except Exception as exc:  # noqa: BLE001
+                        st.error(f"Lead #{lid}: {exc}")
+                st.rerun()
+
+
+def page_apply_pack() -> None:
+    st.header("Apply pack")
+    uid = st.session_state.selected_user_id
+    if not uid:
+        st.warning("Select a profile in the sidebar first.")
+        return
+    user, profile = _load_user_context(uid)
+    _warn_incomplete_profile(user, profile)
+    _soft_contact_warning(user)
+
+    st.markdown(
+        "Generate a **cover letter** and use **Resume Tailor** for the same job. "
+        "Complete the application on the employer or portal site yourself — this tool does not auto-apply."
+    )
+
+    jobs = job_service.list_jobs_for_user(uid)
+    if not jobs:
+        st.info("Add or import a job first.")
+        return
+    labels = {f"{j['company_name']} — {j['role_title']} (#{j['id']})": j["id"] for j in jobs}
+    pick = st.selectbox("Job", list(labels.keys()), key="apply_job_pick")
+    job = job_service.get_job(labels[pick]) or {}
+
+    if job.get("job_link"):
+        st.link_button("Open job posting", job["job_link"])
+
+    if st.button("Generate cover letter + checklist", type="primary", key="gen_cl"):
+        if not OPENAI_API_KEY:
+            st.error("OPENAI_API_KEY missing.")
+        else:
+            try:
+                pack = application_pack_service.generate_cover_letter(
+                    user=user, profile=profile, job=job
+                )
+                st.session_state["last_cover_pack"] = pack
+            except Exception as exc:  # noqa: BLE001
+                st.error(str(exc))
+
+    pack = st.session_state.get("last_cover_pack")
+    if pack:
+        st.text_area("Cover letter", value=pack.get("cover_letter_text") or "", height=260, key="cl_view")
+        st.markdown(pack.get("application_checklist_markdown") or "")
+
+    st.divider()
+    st.caption("After you submit on the portal, mark the application here for tracker + interview prep.")
+    if st.button("Mark this job as Applied", key="mark_applied"):
+        job_service.patch_job(
+            int(job["id"]),
+            {"status": "Applied", "notes": (job.get("notes") or "") + "\nMarked applied from Apply pack."},
+        )
+        st.success("Status updated to Applied.")
+        st.rerun()
+
+
+def page_cold_prospecting() -> None:
+    st.header("Cold prospecting")
+    uid = st.session_state.selected_user_id
+    if not uid:
+        st.warning("Select a profile in the sidebar first.")
+        return
+    user, profile = _load_user_context(uid)
+    _warn_incomplete_profile(user, profile)
+
+    st.markdown(
+        "Light **company research** (from name/URL + your profile only — no live scraping) and a **cold email draft**. "
+        "Review assumptions, verify facts, then send from your own mailbox."
+    )
+
+    prefs_row = preferences_service.get_preferences(uid)
+    prefs_nl = st.text_area(
+        "Preferences context for this outreach",
+        value=(prefs_row or {}).get("preferences_nl") or "",
+        height=120,
+        key=f"cold_prefs_{uid}",
+    )
+    cname = st.text_input("Company name", key=f"cold_co_{uid}")
+    curl = st.text_input("Company or careers URL", key=f"cold_url_{uid}")
+
+    if st.button("Generate research + email draft", type="primary", key=f"cold_go_{uid}"):
+        if not OPENAI_API_KEY:
+            st.error("OPENAI_API_KEY missing.")
+        elif not cname.strip():
+            st.error("Enter a company name.")
+        else:
+            try:
+                out = cold_prospecting_service.generate_cold_pack(
+                    user=user,
+                    profile=profile,
+                    preferences_nl=prefs_nl,
+                    company_name=cname.strip(),
+                    company_url=curl.strip(),
+                )
+                st.session_state["cold_last"] = out
+            except Exception as exc:  # noqa: BLE001
+                st.error(str(exc))
+
+    out = st.session_state.get("cold_last")
+    if out:
+        st.subheader("Research")
+        st.markdown(out.get("research_summary") or "")
+        st.warning(out.get("assumptions_to_verify") or "Verify company facts before sending.")
+        st.subheader("Email")
+        st.text_input("Subject", value=out.get("email_subject") or "", key="cold_subj")
+        st.text_area("Body", value=out.get("email_body") or "", height=280, key="cold_body")
+        if st.button("Save draft to database", key="cold_save"):
+            cold_prospecting_service.save_draft(
+                uid,
+                company_name=cname.strip(),
+                company_url=curl.strip(),
+                research_summary=out.get("research_summary") or "",
+                email_subject=out.get("email_subject") or "",
+                email_body=out.get("email_body") or "",
+            )
+            st.success("Saved draft.")
+            st.rerun()
+
+    drafts = cold_prospecting_service.list_drafts(uid)
+    if drafts:
+        st.subheader("Recent drafts")
+        st.dataframe(
+            pd.DataFrame(drafts)[["company_name", "email_subject", "created_at"]],
+            hide_index=True,
+            use_container_width=True,
+        )
 
 
 def page_resume() -> None:
@@ -802,8 +1087,12 @@ def main() -> None:
         page_dashboard()
     elif page == "User Profile":
         page_user_profile()
+    elif page == "Job Discovery":
+        page_job_discovery()
     elif page == "Add / Analyze Job":
         page_add_job()
+    elif page == "Apply pack":
+        page_apply_pack()
     elif page == "Resume Tailor":
         page_resume()
     elif page == "Outreach Generator":
@@ -814,6 +1103,8 @@ def main() -> None:
         page_tracker()
     elif page == "Compensation Comparator":
         page_compensation()
+    elif page == "Cold prospecting":
+        page_cold_prospecting()
 
 
 if __name__ == "__main__":

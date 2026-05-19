@@ -216,3 +216,108 @@ Output STRICT JSON only."""
 }}
 talking_points: bullet text suitable for email/WhatsApp notes to self."""
     return system, user_msg
+
+
+def parse_job_preferences_prompt(preferences_nl: str) -> tuple[str, str]:
+    system = """You parse a job seeker's natural-language preferences about the Indian market into structured JSON.
+Infer only what is reasonably implied; use null or empty string when unknown.
+Output STRICT JSON only."""
+    user_msg = f"""The user answered these free-text preference questions (location, CTC, remote, startup vs big tech, industries, etc.):
+
+---
+{preferences_nl}
+---
+
+Return JSON with keys:
+{{
+  "locations": string,
+  "primary_role_keywords": string,
+  "min_ctc_lpa": number | null,
+  "remote_preference": "remote_first" | "hybrid_ok" | "office_ok" | "no_pref",
+  "company_type_preference": "startup" | "bigtech" | "both" | "services_ok" | "no_pref",
+  "industries_interest": string,
+  "industries_avoid": string,
+  "other_constraints": string
+}}
+locations: comma-separated Indian cities or "Pan-India" / "Remote India" if stated."""
+    return system, user_msg
+
+
+def rank_job_leads_prompt(
+    user: dict[str, Any],
+    profile: dict[str, Any],
+    prefs_struct: dict[str, Any],
+    leads: list[dict[str, Any]],
+) -> tuple[str, str]:
+    system = """You rank job postings for an Indian professional.
+Use the candidate JSON (LinkedIn + CV + CTC + synthesis) and the structured preferences JSON.
+Each lead may only contain a snippet — score conservatively if information is thin.
+Never invent facts about the employer beyond the snippet.
+Output STRICT JSON only."""
+    slim = []
+    for i, L in enumerate(leads[:18]):
+        slim.append(
+            {
+                "index": i,
+                "title": L.get("title"),
+                "company_name": L.get("company_name"),
+                "location": L.get("location"),
+                "platform": L.get("platform"),
+                "snippet": (L.get("snippet") or "")[:1200],
+                "job_url": L.get("job_url"),
+            }
+        )
+    user_msg = f"""Candidate JSON:\n{candidate_inputs_json(user, profile)}\n\nPreferences JSON:\n{json.dumps(prefs_struct, ensure_ascii=False, indent=2)}\n\nJob leads (parallel array, use index):\n{json.dumps(slim, ensure_ascii=False, indent=2)}\n\nReturn JSON:
+{{
+  "evaluations": [
+    {{
+      "index": number,
+      "ai_fit_score": number,
+      "ai_rationale": string,
+      "apply_recommendation": "Strong apply" | "Maybe" | "Skip"
+    }}
+  ]
+}}
+Provide one evaluation object per lead index (0..n-1). ai_fit_score is 0-100."""
+    return system, user_msg
+
+
+def cover_letter_prompt(
+    user: dict[str, Any], profile: dict[str, Any], job: dict[str, Any]
+) -> tuple[str, str]:
+    system = """You write a concise cover email / letter for an Indian job application.
+Rules:
+- Facts only from candidate JSON; no invented metrics or employers.
+- One page max in plain text; warm, specific to the JD snippet.
+- Mention notice period / joining timeline only if inferable from candidate JSON.
+- Output STRICT JSON only."""
+    user_msg = f"""Candidate JSON:\n{candidate_inputs_json(user, profile)}\n\nJob JSON:\n{json.dumps(job, ensure_ascii=False, indent=2)}\n\nReturn JSON:
+{{
+  "cover_letter_text": string,
+  "application_checklist_markdown": string
+}}
+application_checklist_markdown: short markdown checklist (tailor resume, fill form, attach docs, follow-up date)."""
+    return system, user_msg
+
+
+def cold_company_outreach_prompt(
+    *,
+    user: dict[str, Any],
+    profile: dict[str, Any],
+    preferences_nl: str,
+    company_name: str,
+    company_url: str,
+) -> tuple[str, str]:
+    system = """You draft cold outreach for Indian professionals targeting a specific company.
+You do NOT have live web browsing — infer cautiously from company name/URL pattern and user context only.
+Clearly separate "Assumptions / needs verification" from factual user content.
+No fabricated metrics. Output STRICT JSON only."""
+    user_msg = f"""Candidate JSON:\n{candidate_inputs_json(user, profile)}\n\nUser job-search preferences (natural language):\n{preferences_nl}\n\nTarget company name: {company_name}\nCompany URL (may be careers page or homepage): {company_url}\n\nReturn JSON:
+{{
+  "research_summary": string,
+  "assumptions_to_verify": string,
+  "email_subject": string,
+  "email_body": string
+}}
+email_body: professional, concise, India-appropriate; include polite CTA; under 350 words."""
+    return system, user_msg

@@ -58,12 +58,15 @@ This is **not** a mass auto-apply bot. It is a **high-quality copilot**: honest 
 ## How to use (short)
 
 1. **User Profile** — Paste **LinkedIn profile text** and **resume/CV** (or upload PDF/txt). Enter **current total CTC (LPA)** only. Optionally add name/email for PDF headers. Use **Update career brief (AI)** for suggested roles and CTC bands in India.
-2. **Add / Analyze Job** — Paste a JD and run **Analyze Job Fit** to extract skills, fit score, and recommendations.
-3. **Resume Tailor** — Pick a job, generate a tailored resume (no invented facts), then **Export DOCX**.
-4. **Outreach Generator** — Short India-context messages; LinkedIn drafts are kept under 900 characters when the model obeys the prompt (verify before sending).
-5. **Interview Prep** — Structured pack grounded in JD + profile; company deep-dive may note when external research is needed.
-6. **Application Tracker** — Filter and edit status, priority, follow-up date, and notes; save changes with the button.
-7. **Compensation Comparator** — Deterministic LPA math plus optional AI negotiation brief.
+2. **Job Discovery** — Describe preferences in natural language, **Parse preferences with AI**, then (optionally) set `SERPAPI_API_KEY` and run **Search & rank jobs** (Google Jobs via SerpApi). Import leads into your pipeline; open postings and apply on the portal yourself.
+3. **Add / Analyze Job** — Manually paste a JD and run **Analyze Job Fit** (use this for Naukri/LinkedIn tabs when not using SerpApi discovery).
+4. **Apply pack** — Generate a **cover letter + checklist**, open the posting link, tailor your resume on **Resume Tailor**, then **Mark as Applied** when done.
+5. **Resume Tailor** — Pick a job, generate a tailored resume (no invented facts), then **Export DOCX**.
+6. **Outreach Generator** — Short India-context messages; verify length on LinkedIn before sending.
+7. **Interview Prep** — After a recruiter call, generate a prep pack; use **Application Tracker** for status and follow-ups.
+8. **Application Tracker** — Filter and edit status, priority, follow-up date, and notes.
+9. **Compensation Comparator** — LPA math plus optional AI negotiation brief.
+10. **Cold prospecting** — Target a company with a URL + your preference notes; get a cautious research summary and cold email draft (you send from your inbox).
 
 ## Database reset
 
@@ -77,11 +80,14 @@ On next run, tables are recreated empty.
 
 ## Limitations (MVP)
 
+- **No auto-apply** — LinkedIn, Naukri, Instahyre, and similar sites require you to sign in and submit applications yourself. This app prepares materials and tracks state only.
+- **Discovery source** — Automated job pull uses **SerpApi’s Google Jobs** engine (aggregated listings), not private APIs from each portal. Results and URLs vary by what Google exposes; respect each platform’s terms when applying.
+- **Cold outreach** — Company “research” is LLM text from your profile + company name/URL only; there is **no live web crawl**. Verify facts before sending mail.
 - **Single machine / SQLite** — not suitable for concurrent multi-user production hosting.
-- **No authentication** — anyone with access to the machine can open the app; the sidebar profile switcher is for convenience, not security.
-- **OpenAI dependency** — analysis quality and JSON shape depend on the model; invalid JSON is retried client-side but can still fail on unusual outputs.
-- **Resume export** is intentionally plain/ATS-friendly, not designer-styled.
-- **Compensation math** uses simple heuristics (e.g. risk-adjusted weighting); not tax or legal advice.
+- **No authentication** — sidebar profiles are for convenience, not security.
+- **OpenAI dependency** — JSON-shaped responses can occasionally fail parsing; retry or simplify inputs.
+- **Resume export** is plain/ATS-oriented, not designer-styled.
+- **Compensation math** is heuristic, not tax or legal advice.
 
 ## Future improvements
 

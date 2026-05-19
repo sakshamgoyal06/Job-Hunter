@@ -158,6 +158,47 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_resume_user ON resume_versions(user_id);
             CREATE INDEX IF NOT EXISTS idx_outreach_user ON outreach_messages(user_id);
             CREATE INDEX IF NOT EXISTS idx_interview_user ON interview_prep(user_id);
+
+            CREATE TABLE IF NOT EXISTS job_search_preferences (
+                user_id INTEGER PRIMARY KEY,
+                preferences_nl TEXT,
+                structured_json TEXT,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS job_leads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT,
+                company_name TEXT,
+                location TEXT,
+                platform TEXT,
+                job_url TEXT,
+                snippet TEXT,
+                jd_text TEXT,
+                ai_fit_score REAL,
+                ai_rationale TEXT,
+                apply_recommendation TEXT,
+                imported_job_id INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS cold_outreach_drafts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                company_name TEXT,
+                company_url TEXT,
+                research_summary TEXT,
+                email_subject TEXT,
+                email_body TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_job_leads_user ON job_leads(user_id);
+            CREATE INDEX IF NOT EXISTS idx_cold_outreach_user ON cold_outreach_drafts(user_id);
             """
         )
         _migrate_schema(conn)
