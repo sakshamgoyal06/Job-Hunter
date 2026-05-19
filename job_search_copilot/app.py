@@ -192,6 +192,8 @@ def page_dashboard() -> None:
 def _clear_profile_widget_state(suffix: str) -> None:
     for k in (
         f"_hydr_sf_{suffix}",
+        f"_pending_ln_append_{suffix}",
+        f"_pending_cv_append_{suffix}",
         f"ln_{suffix}",
         f"cv_{suffix}",
         f"nm_{suffix}",
@@ -200,6 +202,18 @@ def _clear_profile_widget_state(suffix: str) -> None:
         f"ctc_{suffix}",
     ):
         st.session_state.pop(k, None)
+
+
+def _apply_pending_profile_file_appends(suffix: str) -> None:
+    """Merge PDF/text extracts into ln/cv *before* text_area widgets run (Streamlit rule)."""
+    p_ln = st.session_state.pop(f"_pending_ln_append_{suffix}", None)
+    if isinstance(p_ln, str) and p_ln.strip():
+        cur = str(st.session_state.get(f"ln_{suffix}", ""))
+        st.session_state[f"ln_{suffix}"] = (cur + "\n\n" + p_ln.strip()).strip()
+    p_cv = st.session_state.pop(f"_pending_cv_append_{suffix}", None)
+    if isinstance(p_cv, str) and p_cv.strip():
+        cur = str(st.session_state.get(f"cv_{suffix}", ""))
+        st.session_state[f"cv_{suffix}"] = (cur + "\n\n" + p_cv.strip()).strip()
 
 
 def page_user_profile() -> None:
@@ -259,6 +273,8 @@ def page_user_profile() -> None:
             st.session_state.setdefault(f"ctc_{suffix}", 0.0)
         st.session_state[hkey] = True
 
+    _apply_pending_profile_file_appends(suffix)
+
     st.subheader("Your inputs")
     st.text_input("Display name (sidebar label)", key=f"nm_{suffix}")
     st.text_input("Email (optional — for resume header)", key=f"em_{suffix}")
@@ -281,9 +297,7 @@ def page_user_profile() -> None:
                 if not chunk.strip():
                     st.error("No text extracted from file.")
                 else:
-                    cur_ln = str(st.session_state.get(f"ln_{suffix}", ""))
-                    st.session_state[f"ln_{suffix}"] = (cur_ln + "\n\n" + chunk.strip()).strip()
-                    st.success("Appended. Review the LinkedIn text box.")
+                    st.session_state[f"_pending_ln_append_{suffix}"] = chunk.strip()
                     st.rerun()
             except Exception as exc:  # noqa: BLE001
                 st.error(str(exc))
@@ -301,9 +315,7 @@ def page_user_profile() -> None:
                 if not chunk.strip():
                     st.error("No text extracted from file.")
                 else:
-                    cur = str(st.session_state.get(f"cv_{suffix}", ""))
-                    st.session_state[f"cv_{suffix}"] = (cur + "\n\n" + chunk.strip()).strip()
-                    st.success("Appended. Review the CV text box.")
+                    st.session_state[f"_pending_cv_append_{suffix}"] = chunk.strip()
                     st.rerun()
             except Exception as exc:  # noqa: BLE001
                 st.error(str(exc))
