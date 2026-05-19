@@ -57,7 +57,7 @@ This is **not** a mass auto-apply bot. It is a **high-quality copilot**: honest 
 
 ## How to use (short)
 
-1. **User Profile** — Paste **LinkedIn profile text** and **resume/CV** (or upload PDF/txt). Enter **current total CTC (LPA)** only. Optionally add name/email for PDF headers. Use **Update career brief (AI)** for suggested roles and CTC bands in India.
+1. **User Profile** — **LinkedIn**: paste profile text or upload a **PDF** (print profile → Save as PDF). **Resume/CV**: paste or upload PDF/txt. Enter **current total CTC (LPA)** only. Optionally add name/email for PDF headers. Use **Update career brief (AI)** for suggested roles and CTC bands in India.
 2. **Job Discovery** — Save & parse **preferences**, open **Playbook** for AI-built LinkedIn links + Google queries, **Import** pasted URLs or messy text into **staging**, optionally attach **JD blocks** (delimiter `---`), **AI rank**, then **import** into your tracker. No SerpApi required.
 3. **Add / Analyze Job** — Manually paste a JD and run **Analyze Job Fit** (use this for Naukri/LinkedIn tabs when not using SerpApi discovery).
 4. **Apply pack** — Generate a **cover letter + checklist**, open the posting link, tailor your resume on **Resume Tailor**, then **Mark as Applied** when done.

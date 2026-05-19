@@ -34,7 +34,9 @@ def is_profile_incomplete(
     ln = clean_text(prof.get("linkedin_profile_text"))
     cv = clean_text(prof.get("resume_cv_text")) or clean_text(prof.get("base_resume_text"))
     if len(ln) < 40:
-        missing.append("LinkedIn profile text (paste more from your profile)")
+        missing.append(
+            "LinkedIn profile text (paste from the site or upload a profile PDF under User Profile)"
+        )
     if len(cv) < 40:
         missing.append("Resume / CV text (paste more or upload a file)")
 

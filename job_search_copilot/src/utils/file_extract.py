@@ -1,4 +1,4 @@
-"""Extract plain text from uploaded CV files (PDF / text)."""
+"""Extract plain text from uploaded files (CV PDF, LinkedIn profile PDF, plain text)."""
 
 from __future__ import annotations
 

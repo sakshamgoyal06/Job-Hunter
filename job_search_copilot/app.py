@@ -205,8 +205,9 @@ def _clear_profile_widget_state(suffix: str) -> None:
 def page_user_profile() -> None:
     st.header("User Profile")
     st.caption(
-        "Paste your **LinkedIn profile** (About + Experience + Headline) and your **resume/CV** text. "
-        "We only ask for your **current total CTC (LPA)** — the app infers skills, education, and experience from those two sources."
+        "Bring your **LinkedIn profile** as pasted text or a **PDF** (browser: open your profile → Print → Save as PDF). "
+        "Add your **resume/CV** as text or PDF the same way. "
+        "We only ask for your **current total CTC (LPA)** — the app infers skills, education, and experience from those sources."
     )
     users = profile_service.list_users()
     uid = st.session_state.selected_user_id
@@ -264,8 +265,28 @@ def page_user_profile() -> None:
     st.text_input("Phone (optional)", key=f"ph_{suffix}")
     st.number_input("Current total CTC (LPA)", min_value=0.0, step=0.5, key=f"ctc_{suffix}")
 
-    st.markdown("**LinkedIn** — copy from your browser (Headline, About, Experience).")
-    st.text_area("LinkedIn profile text", key=f"ln_{suffix}", height=220)
+    st.markdown(
+        "**LinkedIn** — copy **Headline, About, Experience** from the site, "
+        "or upload a **PDF** of your profile (print/save from the browser; text is extracted locally)."
+    )
+    ln_c1, ln_c2 = st.columns((2, 1))
+    with ln_c1:
+        st.text_area("LinkedIn profile text", key=f"ln_{suffix}", height=220)
+    with ln_c2:
+        st.markdown("**Or upload** PDF / text (appends on button).")
+        up_ln = st.file_uploader("LinkedIn file", type=["pdf", "txt", "md"], key=f"ln_up_{suffix}")
+        if up_ln is not None and st.button("Extract & append to LinkedIn", key=f"app_ln_{suffix}"):
+            try:
+                chunk = extract_text_from_upload(up_ln.name, up_ln.getvalue())
+                if not chunk.strip():
+                    st.error("No text extracted from file.")
+                else:
+                    cur_ln = str(st.session_state.get(f"ln_{suffix}", ""))
+                    st.session_state[f"ln_{suffix}"] = (cur_ln + "\n\n" + chunk.strip()).strip()
+                    st.success("Appended. Review the LinkedIn text box.")
+                    st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(str(exc))
 
     c1, c2 = st.columns((2, 1))
     with c1:
